@@ -52,6 +52,21 @@ input,textarea{font-family:inherit;outline:none;border:none}
 .clear-btn:hover{color:var(--danger);background:var(--danger-light)}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99}
 
+/* Settings Panel */
+.settings-panel{position:fixed;top:0;right:-320px;width:300px;max-width:85vw;height:100%;background:var(--white);box-shadow:-2px 0 12px rgba(0,0,0,.1);z-index:101;transition:right .3s;padding:20px;overflow-y:auto}
+.settings-panel.open{right:0}
+.settings-title{font-size:18px;font-weight:700;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
+.settings-close{font-size:24px;color:var(--gray-400);padding:4px}
+.settings-group{margin-bottom:20px}
+.settings-label{font-size:13px;font-weight:600;color:var(--gray-600);margin-bottom:6px;display:block}
+.settings-input{width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;background:var(--gray-50)}
+.settings-hint{font-size:11px;color:var(--gray-400);margin-top:4px;line-height:1.4}
+.settings-save{width:100%;padding:10px;background:var(--primary);color:#fff;border-radius:8px;font-size:14px;font-weight:600;margin-top:12px}
+.settings-save:hover{background:var(--primary-dark)}
+.settings-status{font-size:12px;margin-top:8px;padding:6px 10px;border-radius:6px;display:none}
+.settings-status.ok{display:block;background:#D1FAE5;color:#065F46}
+.settings-status.err{display:block;background:#FEE2E2;color:#991B1B}
+
 /* Main */
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .main-header{height:var(--header-height);background:var(--white);border-bottom:1px solid var(--gray-200);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0}
@@ -155,7 +170,28 @@ input,textarea{font-family:inherit;outline:none;border:none}
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">就绪</span>
       </div>
+      <button id="settingsBtn" style="font-size:20px;padding:4px 8px;color:var(--gray-500)" title="设置">⚙️</button>
     </header>
+
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="settings-title">⚙️ 设置 <button class="settings-close" id="settingsClose">×</button></div>
+      <div class="settings-group">
+        <label class="settings-label">API 密钥</label>
+        <input type="password" class="settings-input" id="apiKeyInput" placeholder="输入 MiMo API Key">
+        <div class="settings-hint">密钥仅保存在本地浏览器，不会上传到任何服务器。</div>
+      </div>
+      <div class="settings-group">
+        <label class="settings-label">API 地址</label>
+        <input type="text" class="settings-input" id="apiBaseInput" placeholder="https://token-plan-cn.xiaomimimo.com/v1">
+      </div>
+      <div class="settings-group">
+        <label class="settings-label">模型名称</label>
+        <input type="text" class="settings-input" id="modelInput" placeholder="mimo-v2.5">
+      </div>
+      <button class="settings-save" id="settingsSave">保存设置</button>
+      <div class="settings-status" id="settingsStatus"></div>
+    </div>
 
     <div class="chat-area" id="chatArea">
       <div class="welcome" id="welcomeScreen">
@@ -458,14 +494,38 @@ async function sendMessage(text) {
       content: m.text
     }));
 
-    const resp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history })
-    });
+    let data;
+    const storedKey = localStorage.getItem('yizhi_api_key');
+    const storedBase = localStorage.getItem('yizhi_api_base') || 'https://token-plan-cn.xiaomimimo.com/v1';
+    const storedModel = localStorage.getItem('yizhi_model') || 'mimo-v2.5';
 
-    if (!resp.ok) throw new Error('API error');
-    const data = await resp.json();
+    if (storedKey) {
+      // Direct API call (GitHub Pages mode)
+      const kbResults = retrieveKB(text);
+      const context = buildContext(kbResults);
+      const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+      if (context) messages.push({ role: 'system', content: `以下是检索到的相关医学知识，请参考回答：\n\n${context}` });
+      history.slice(-10).forEach(h => messages.push(h));
+      messages.push({ role: 'user', content: text });
+
+      const resp = await fetch(`${storedBase}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${storedKey}` },
+        body: JSON.stringify({ model: storedModel, messages, temperature: 0.7, max_tokens: 500 })
+      });
+      if (!resp.ok) throw new Error('API error');
+      const result = await resp.json();
+      data = { reply: result.choices[0].message.content, sources: kbResults.map(r => ({ title: r.title, category: r.category, source: r.source })) };
+    } else {
+      // Proxy call (Vercel mode)
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history })
+      });
+      if (!resp.ok) throw new Error('API error');
+      data = await resp.json();
+    }
     const aiText = data.reply || data.text || data.message || '抱歉，我暂时无法回答这个问题。';
     const sources = data.sources || [];
 
@@ -641,6 +701,87 @@ ttsToggle.classList.toggle('on', autoTTS);
 
 // Init sidebar
 renderSidebar();
+
+// ===== Settings Panel =====
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+const settingsClose = document.getElementById('settingsClose');
+const settingsSave = document.getElementById('settingsSave');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const apiBaseInput = document.getElementById('apiBaseInput');
+const modelInput = document.getElementById('modelInput');
+const settingsStatus = document.getElementById('settingsStatus');
+
+// Load saved settings
+apiKeyInput.value = localStorage.getItem('yizhi_api_key') || '';
+apiBaseInput.value = localStorage.getItem('yizhi_api_base') || 'https://token-plan-cn.xiaomimimo.com/v1';
+modelInput.value = localStorage.getItem('yizhi_model') || 'mimo-v2.5';
+
+settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
+settingsClose.addEventListener('click', () => settingsPanel.classList.remove('open'));
+
+settingsSave.addEventListener('click', () => {
+  const key = apiKeyInput.value.trim();
+  const base = apiBaseInput.value.trim();
+  const model = modelInput.value.trim();
+  if (key) localStorage.setItem('yizhi_api_key', key);
+  else localStorage.removeItem('yizhi_api_key');
+  if (base) localStorage.setItem('yizhi_api_base', base);
+  if (model) localStorage.setItem('yizhi_model', model);
+  settingsStatus.className = 'settings-status ok';
+  settingsStatus.textContent = '✓ 设置已保存';
+  setTimeout(() => settingsStatus.className = 'settings-status', 2000);
+});
+
+// Close settings on overlay click
+document.addEventListener('click', (e) => {
+  if (settingsPanel.classList.contains('open') && !settingsPanel.contains(e.target) && e.target !== settingsBtn) {
+    settingsPanel.classList.remove('open');
+  }
+});
+
+// ===== Knowledge Base (Client-side RAG) =====
+const SYSTEM_PROMPT = '你是医学科普助手"医知"。只回答医学健康相关的问题。原则：科学准确、简洁易懂、每条回答末尾加"仅供参考，请遵医嘱"。回答控制在150字以内，只说最关键的信息，不用markdown标题、不用emoji、直接用口语化短句回答。只回答与医学健康相关的问题，非医学问题回复："抱歉，我只能回答医学健康相关的问题。"';
+
+const KB = [
+  {id:"d001",category:"常见疾病",title:"普通感冒",keywords:["感冒","流鼻涕","打喷嚏","鼻塞","伤风"],answer:"普通感冒由病毒引起，不需要抗生素。多休息、多喝水，发烧可用对乙酰氨基酚或布洛芬退热，鼻塞用生理盐水洗鼻，一般7天自愈。高热超3天或呼吸困难需就医。",source:"《内科学》第9版"},
+  {id:"d002",category:"常见疾病",title:"高血压",keywords:["高血压","血压高","头晕","降压药"],answer:"高血压指收缩压≥140和/或舒张压≥90mmHg。低盐饮食（每日<6克）、规律运动、控制体重、戒烟限酒、遵医嘱按时服药、定期监测血压。",source:"《内科学》第9版"},
+  {id:"d003",category:"常见疾病",title:"糖尿病",keywords:["糖尿病","血糖高","胰岛素"],answer:"糖尿病分1型和2型，2型占90%以上。早期信号：多饮多食多尿体重减少。控制碳水、有氧运动、定期测血糖、遵医嘱用药。",source:"《内科学》第9版"},
+  {id:"d004",category:"常见疾病",title:"胃炎与胃溃疡",keywords:["胃痛","胃炎","胃溃疡","消化不良","幽门螺杆菌"],answer:"胃痛常见原因：幽门螺杆菌感染、长期服止痛药、饮酒。建议做C13呼气试验，少食多餐、细嚼慢咽、戒烟限酒。黑便呕血需立即就医。",source:"《内科学》第9版"},
+  {id:"d005",category:"常见疾病",title:"腰椎间盘突出",keywords:["腰痛","腰椎","椎间盘","腿麻"],answer:"腰椎间盘突出压迫神经引起腰痛和腿痛。急性期卧硬板床、口服消炎止痛药、做小燕飞锻炼。保守治疗3个月无效或大小便障碍需手术。",source:"《外科学》第9版"},
+  {id:"d006",category:"常见疾病",title:"过敏性鼻炎",keywords:["鼻炎","过敏","打喷嚏","鼻痒","花粉"],answer:"过敏性鼻炎避免接触过敏原最有效。一线治疗用鼻喷激素（布地奈德），口服氯雷他定。不要长期用滴鼻净，连续不超7天。",source:"《耳鼻咽喉头颈外科学》第9版"},
+  {id:"d007",category:"常见疾病",title:"焦虑与失眠",keywords:["失眠","焦虑","睡不着","抑郁"],answer:"失眠首选非药物治疗：固定作息、睡前1小时远离手机、下午3点后不喝咖啡。CBT-I是最有效的失眠治疗。持续情绪低落请寻求专业帮助。",source:"《精神病学》第8版"},
+  {id:"e001",category:"急救知识",title:"心肺复苏（CPR）",keywords:["心肺复苏","CPR","急救","心脏骤停"],answer:"心脏骤停立即CPR：拨打120，胸外按压两乳头连线中点，深度5-6cm，频率100-120次/分，每30次按压做2次人工呼吸。有AED立即使用。",source:"《2020年AHA心肺复苏指南》"},
+  {id:"e002",category:"急救知识",title:"海姆立克急救法",keywords:["噎住","异物卡喉","海姆立克","呛到"],answer:"食物卡喉用海姆立克法：站在患者身后，双手环抱腰部，一手握拳放在肚脐上方两横指，另一手包住拳头快速向内向上冲击。",source:"《急救医学》第3版"},
+  {id:"e003",category:"急救知识",title:"烫伤处理",keywords:["烫伤","烧伤","开水烫"],answer:"烫伤五字口诀：冲（冷水冲15-20分钟）、脱（小心脱衣）、泡（继续泡冷水）、盖（纱布覆盖）、送（严重送医）。不要涂牙膏酱油。",source:"《外科学》第9版"},
+  {id:"e004",category:"急救知识",title:"中暑急救",keywords:["中暑","热射病","高温","夏天"],answer:"中暑转移到阴凉处、解开衣物、湿毛巾擦拭颈部腋下腹股沟、补充淡盐水。体温>40℃或意识不清立即拨打120。",source:"《急诊与灾难医学》第3版"},
+  {id:"m001",category:"用药安全",title:"布洛芬和对乙酰氨基酚",keywords:["布洛芬","对乙酰氨基酚","退烧","止痛","退热"],answer:"对乙酰氨基酚退热止痛不伤胃，每日最大2克；布洛芬退热止痛消炎但伤胃。可交替使用间隔4小时。发热超3天需就医。",source:"《药理学》第9版"},
+  {id:"m002",category:"用药安全",title:"抗生素正确使用",keywords:["抗生素","头孢","阿莫西林","消炎药"],answer:"抗生素只对细菌有效，对病毒（感冒流感）无效。必须遵医嘱足疗程使用，不能自行停药，不能把别人的抗生素拿来吃。",source:"《药理学》第9版"},
+  {id:"m003",category:"用药安全",title:"药物食物相互作用",keywords:["吃药","忌口","柚子","喝酒吃药"],answer:"西柚影响100多种药物代谢；头孢+酒精可致死；牛奶影响四环素吸收；服用抗凝药保持维生素K摄入稳定。用白开水送药最安全。",source:"《药理学》第9版"},
+  {id:"h001",category:"健康误区",title:"献血影响健康吗",keywords:["献血","贫血"],answer:"适量献血不影响健康。每次200-400ml仅占总血量5-10%，骨髓会加速造血。献血条件：18-55岁、体重男≥50kg女≥45kg。",source:"《中华人民共和国献血法》"},
+  {id:"h002",category:"健康误区",title:"输液比吃药好得快",keywords:["输液","打吊瓶","挂水"],answer:"不一定！世卫组织提倡能口服不肌注能肌注不输液。输液风险比口服大。普通感冒发烧口服退热药即可。",source:"国家卫健委文件"},
+  {id:"h003",category:"健康误区",title:"体检报告怎么看",keywords:["体检","血常规","转氨酶","尿酸","血糖"],answer":"箭头↑高于正常↓低于正常。白细胞↑提示感染，血红蛋白↓提示贫血，转氨酶↑提示肝受损，空腹血糖≥7需警惕糖尿病。单项轻度异常不一定有病。",source:"《诊断学》第9版"},
+  {id:"b001",category:"人体科普",title:"免疫系统",keywords:["免疫","免疫力","白细胞","抗体"],answer:"免疫系统三道防线：皮肤黏膜（物理屏障）、白细胞巨噬细胞（非特异性）、T细胞B细胞抗体（特异性）。充足睡眠、均衡饮食、适度运动是最好的免疫增强剂。",source:"《医学免疫学》第7版"},
+  {id:"b002",category:"人体科普",title:"肠道菌群",keywords:["肠道","益生菌","菌群","便秘"],answer:"肠道有100万亿微生物帮助消化、合成维生素、调节免疫。多吃膳食纤维和发酵食品、少吃高糖高脂、不滥用抗生素维护肠道健康。",source:"《医学微生物学》第9版"},
+  {id:"b003",category:"人体科普",title:"疫苗原理",keywords:["疫苗","接种","打疫苗"],answer:"疫苗用减毒或灭活的病原体刺激免疫系统产生抗体和记忆细胞。真正感染时能快速反应。按时接种国家免疫规划疫苗是每个公民的责任。",source:"《医学免疫学》第7版"}
+];
+
+function retrieveKB(query, topK=3) {
+  const scores = {};
+  KB.forEach(entry => {
+    let score = 0;
+    if (query.includes(entry.title)) score += 3;
+    entry.keywords.forEach(kw => { if (query.includes(kw)) score += 2; });
+    if (score > 0) scores[entry.id] = score;
+  });
+  const sorted = Object.keys(scores).sort((a,b) => scores[b] - scores[a]).slice(0, topK);
+  return sorted.map(id => KB.find(e => e.id === id)).filter(Boolean);
+}
+
+function buildContext(results) {
+  if (!results.length) return '';
+  return results.map((r, i) => `【参考资料${i+1}】${r.title}（来源：${r.source}）\n${r.answer}`).join('\n\n---\n\n');
+}
 
 // PWA service worker
 if ('serviceWorker' in navigator) {
