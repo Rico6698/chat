@@ -170,28 +170,7 @@ input,textarea{font-family:inherit;outline:none;border:none}
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">就绪</span>
       </div>
-      <button id="settingsBtn" style="font-size:20px;padding:4px 8px;color:var(--gray-500)" title="设置">⚙️</button>
     </header>
-
-    <!-- Settings Panel -->
-    <div class="settings-panel" id="settingsPanel">
-      <div class="settings-title">⚙️ 设置 <button class="settings-close" id="settingsClose">×</button></div>
-      <div class="settings-group">
-        <label class="settings-label">API 密钥</label>
-        <input type="password" class="settings-input" id="apiKeyInput" placeholder="输入 MiMo API Key">
-        <div class="settings-hint">密钥仅保存在本地浏览器，不会上传到任何服务器。</div>
-      </div>
-      <div class="settings-group">
-        <label class="settings-label">API 地址</label>
-        <input type="text" class="settings-input" id="apiBaseInput" placeholder="https://token-plan-cn.xiaomimimo.com/v1">
-      </div>
-      <div class="settings-group">
-        <label class="settings-label">模型名称</label>
-        <input type="text" class="settings-input" id="modelInput" placeholder="mimo-v2.5">
-      </div>
-      <button class="settings-save" id="settingsSave">保存设置</button>
-      <div class="settings-status" id="settingsStatus"></div>
-    </div>
 
     <div class="chat-area" id="chatArea">
       <div class="welcome" id="welcomeScreen">
@@ -495,37 +474,26 @@ async function sendMessage(text) {
     }));
 
     let data;
-    const storedKey = localStorage.getItem('yizhi_api_key');
-    const storedBase = localStorage.getItem('yizhi_api_base') || 'https://token-plan-cn.xiaomimimo.com/v1';
-    const storedModel = localStorage.getItem('yizhi_model') || 'mimo-v2.5';
 
-    if (storedKey) {
-      // Direct API call (GitHub Pages mode)
-      const kbResults = retrieveKB(text);
-      const context = buildContext(kbResults);
-      const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-      if (context) messages.push({ role: 'system', content: `以下是检索到的相关医学知识，请参考回答：\n\n${context}` });
-      history.slice(-10).forEach(h => messages.push(h));
-      messages.push({ role: 'user', content: text });
+    // 直接调用MiMo API
+    const API_BASE = 'https://token-plan-cn.xiaomimimo.com/v1';
+    const API_KEY='tp-cbs...const MODEL = 'mimo-v2.5';
 
-      const resp = await fetch(`${storedBase}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${storedKey}` },
-        body: JSON.stringify({ model: storedModel, messages, temperature: 0.7, max_tokens: 500 })
-      });
-      if (!resp.ok) throw new Error('API error');
-      const result = await resp.json();
-      data = { reply: result.choices[0].message.content, sources: kbResults.map(r => ({ title: r.title, category: r.category, source: r.source })) };
-    } else {
-      // Proxy call (Vercel mode)
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history })
-      });
-      if (!resp.ok) throw new Error('API error');
-      data = await resp.json();
-    }
+    const kbResults = retrieveKB(text);
+    const context = buildContext(kbResults);
+    const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+    if (context) messages.push({ role: 'system', content: `以下是检索到的相关医学知识，请参考回答：\n\n${context}` });
+    history.slice(-10).forEach(h => messages.push(h));
+    messages.push({ role: 'user', content: text });
+
+    const resp = await fetch(`${API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 500 })
+    });
+    if (!resp.ok) throw new Error('API error');
+    const result = await resp.json();
+    data = { reply: result.choices[0].message.content, sources: kbResults.map(r => ({ title: r.title, category: r.category, source: r.source })) };
     const aiText = data.reply || data.text || data.message || '抱歉，我暂时无法回答这个问题。';
     const sources = data.sources || [];
 
@@ -701,44 +669,6 @@ ttsToggle.classList.toggle('on', autoTTS);
 
 // Init sidebar
 renderSidebar();
-
-// ===== Settings Panel =====
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsPanel = document.getElementById('settingsPanel');
-const settingsClose = document.getElementById('settingsClose');
-const settingsSave = document.getElementById('settingsSave');
-const apiKeyInput = document.getElementById('apiKeyInput');
-const apiBaseInput = document.getElementById('apiBaseInput');
-const modelInput = document.getElementById('modelInput');
-const settingsStatus = document.getElementById('settingsStatus');
-
-// Load saved settings
-apiKeyInput.value = localStorage.getItem('yizhi_api_key') || '';
-apiBaseInput.value = localStorage.getItem('yizhi_api_base') || 'https://token-plan-cn.xiaomimimo.com/v1';
-modelInput.value = localStorage.getItem('yizhi_model') || 'mimo-v2.5';
-
-settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
-settingsClose.addEventListener('click', () => settingsPanel.classList.remove('open'));
-
-settingsSave.addEventListener('click', () => {
-  const key = apiKeyInput.value.trim();
-  const base = apiBaseInput.value.trim();
-  const model = modelInput.value.trim();
-  if (key) localStorage.setItem('yizhi_api_key', key);
-  else localStorage.removeItem('yizhi_api_key');
-  if (base) localStorage.setItem('yizhi_api_base', base);
-  if (model) localStorage.setItem('yizhi_model', model);
-  settingsStatus.className = 'settings-status ok';
-  settingsStatus.textContent = '✓ 设置已保存';
-  setTimeout(() => settingsStatus.className = 'settings-status', 2000);
-});
-
-// Close settings on overlay click
-document.addEventListener('click', (e) => {
-  if (settingsPanel.classList.contains('open') && !settingsPanel.contains(e.target) && e.target !== settingsBtn) {
-    settingsPanel.classList.remove('open');
-  }
-});
 
 // ===== Knowledge Base (Client-side RAG) =====
 const SYSTEM_PROMPT = '你是医学科普助手"医知"。只回答医学健康相关的问题。原则：科学准确、简洁易懂、每条回答末尾加"仅供参考，请遵医嘱"。回答控制在150字以内，只说最关键的信息，不用markdown标题、不用emoji、直接用口语化短句回答。只回答与医学健康相关的问题，非医学问题回复："抱歉，我只能回答医学健康相关的问题。"';
