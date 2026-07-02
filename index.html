@@ -176,7 +176,7 @@ input,textarea{font-family:inherit;outline:none;border:none}
       <div class="welcome" id="welcomeScreen">
         <div class="welcome-logo">🩺</div>
         <h2>您好，我是医知</h2>
-        <p>您的智能医疗健康助手，可以回答各类医疗健康相关问题。<br>请注意：我不能替代专业医生的诊断和建议。</p>
+        <p>您的智能医学科普助手，可以回答医学健康问题，也可以问我“医知”是什么。<br>请注意：所有回答仅供参考，不构成医疗建议。</p>
         <div class="quick-cards">
           <div class="quick-card" data-q="感冒和流感有什么区别？">
             <div class="card-icon">🤒</div>
@@ -245,7 +245,12 @@ const MEDICAL_KEYWORDS = [
 
 function isMedicalQuestion(text) {
   const lower = text.toLowerCase();
-  return MEDICAL_KEYWORDS.some(k => lower.includes(k));
+  if (MEDICAL_KEYWORDS.some(k => lower.includes(k))) return true;
+  const sk = ['医知','你是谁','你是什么','怎么用','功能','介绍',
+    '怎么工作','技术','架构','原理','系统','助手','聊天机器人',
+    '你能做什么','你会什么','你叫什么','开发','知识库',
+    'API','模型','MiMo','大语言','LLM','训练','数据'];
+  return sk.some(k => lower.includes(k.toLowerCase()));
 }
 
 // State
@@ -525,18 +530,58 @@ async function sendMessage(text) {
 }
 
 // TTS
-function speakText(text) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  // Limit text length for TTS
-  const short = text.replace(/<[^>]+>/g, '').slice(0, 500);
-  const utter = new SpeechSynthesisUtterance(short);
-  utter.lang = 'zh-CN';
-  utter.rate = 1;
-  utter.onstart = () => setStatus('speaking', '正在朗读...');
-  utter.onend = () => setStatus('ready', '就绪');
-  utter.onerror = () => setStatus('ready', '就绪');
-  window.speechSynthesis.speak(utter);
+async function speakText(text) {
+  const clean = text.replace(/<[^>]+>/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').slice(0, 500);
+  if (!clean) return;
+  setStatus('speaking', '\u6b63\u5728\u6717\u8bfb...');
+  try {
+    const wsUrl = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=' + crypto.randomUUID();
+    const ws = new WebSocket(wsUrl);
+    const chunks = [];
+    let done = false;
+    const finish = () => { if (!done) { done = true; setStatus('ready', '\u5c31\u7eea'); } };
+    ws.onopen = () => {
+      const cfg = 'X-Timestamp:Tue Jan 01 2025 00:00:00 GMT+0000 (UTC)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}';
+      ws.send(cfg);
+      const rid = crypto.randomUUID().replace(/-/g,'');
+      const safe = clean.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const ssml = 'X-RequestId:' + rid + '\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:Tue Jan 01 2025 00:00:00 GMT+0000 (UTC)\r\nPath:ssml\r\n\r\n<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN"><voice name="zh-CN-XiaoxiaoNeural"><prosody rate="+0%" pitch="+0Hz">' + safe + '</prosody></voice></speak>';
+      ws.send(ssml);
+    };
+    ws.onmessage = (evt) => {
+      if (evt.data instanceof Blob) {
+        evt.data.arrayBuffer().then(buf => {
+          const hdr = new DataView(buf).getUint16(0);
+          const body = buf.slice(hdr + 2);
+          if (body.byteLength > 0) chunks.push(body);
+        });
+      } else if (typeof evt.data === 'string' && evt.data.includes('Path:turn.end')) {
+        ws.close();
+        if (chunks.length) {
+          const blob = new Blob(chunks, {type:'audio/mpeg'});
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => { URL.revokeObjectURL(url); finish(); };
+          audio.onerror = finish;
+          audio.play().catch(finish);
+        } else finish();
+      }
+    };
+    ws.onerror = () => { ws.close(); fbSpeak(clean, finish); };
+    ws.onclose = () => finish();
+    setTimeout(() => { if (!done) { ws.close(); fbSpeak(clean, finish); } }, 15000);
+  } catch(e) { fbSpeak(clean, () => setStatus('ready', '\u5c31\u7eea')); }
+}
+function fbSpeak(text, cb) {
+  if (!('speechSynthesis' in window)) { cb(); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN'; u.rate = 1;
+  const vs = speechSynthesis.getVoices();
+  const v = vs.find(v => v.lang.startsWith('zh') && v.name.includes('Xiaoxiao')) || vs.find(v => v.lang.startsWith('zh'));
+  if (v) u.voice = v;
+  u.onend = cb; u.onerror = cb;
+  speechSynthesis.speak(u);
 }
 
 function setStatus(state, text) {
@@ -672,7 +717,7 @@ ttsToggle.classList.toggle('on', autoTTS);
 renderSidebar();
 
 // ===== Knowledge Base (Client-side RAG) =====
-const SYSTEM_PROMPT = '你是医学科普助手"医知"。只回答医学健康相关的问题。原则：科学准确、简洁易懂、每条回答末尾加"仅供参考，请遵医嘱"。回答控制在150字以内，只说最关键的信息，不用markdown标题、不用emoji、直接用口语化短句回答。只回答与医学健康相关的问题，非医学问题回复："抱歉，我只能回答医学健康相关的问题。"';
+const SYSTEM_PROMPT = '你是医学科普助手“医知”。专注医学健康科普，同时也可以回答用户对“医知”系统本身的提问（如功能介绍、使用方法、技术原理等）。\n\n回答原则：\n- 科学准确、简洁易懂、口语化短句\n- 医学问题末尾加“仅供参考，请遵医嘱”\n- 回答控制在150字以内\n- 不用markdown标题、不用emoji、不用粗体\n\n只回答以下两类问题：\n1. 医学健康相关（疾病、用药、急救、营养、心理、体检等）\n2. 对“医知”系统的提问（如“你是什么”“你怎么工作”“你用了什么技术”等）\n其他话题回复：“抱歉，我是医学科普助手“医知”，可以回答医学健康问题和关于我的提问。”'
 
 const KB = [
   {id:"d001",category:"常见疾病",title:"普通感冒",keywords:["感冒","流鼻涕","打喷嚏","鼻塞","伤风"],answer:"普通感冒由病毒引起，不需要抗生素。多休息、多喝水，发烧可用对乙酰氨基酚或布洛芬退热，鼻塞用生理盐水洗鼻，一般7天自愈。高热超3天或呼吸困难需就医。",source:"《内科学》第9版"},
