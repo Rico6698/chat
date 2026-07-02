@@ -5,7 +5,6 @@ RAG + LLM medical Q&A - API key stored in environment variables
 import os
 import re
 import json
-from http.server import BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
