@@ -1,11 +1,21 @@
 {
   "version": 2,
   "functions": {
-    "api/chat.py": {"runtime": "@vercel/python@3"},
-    "api/tts.py": {"runtime": "@vercel/python@3"}
+    "api/chat.py": {
+      "runtime": "@vercel/python"
+    },
+    "api/tts.py": {
+      "runtime": "@vercel/python"
+    }
   },
   "routes": [
-    {"src": "/api/(.*)", "dest": "/api/$1"},
-    {"src": "/(.*)", "dest": "/index.html"}
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
   ]
 }
