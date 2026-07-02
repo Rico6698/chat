@@ -718,7 +718,7 @@ function buildContext(results) {
 if ('serviceWorker' in navigator) {
   // Minimal inline SW via blob
   const swCode = `
-    const CACHE='medbot-v1';
+    const CACHE='medbot-v2';
     self.addEventListener('install',e=>{self.skipWaiting()});
     self.addEventListener('activate',e=>{e.waitUntil(clients.claim())});
     self.addEventListener('fetch',e=>{
