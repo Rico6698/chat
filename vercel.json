@@ -3,6 +3,5 @@
     "api/**/*.py": {
       "runtime": "@vercel/python@3"
     }
-  },
-  "outputDirectory": "."
+  }
 }
