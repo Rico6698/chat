@@ -6,14 +6,6 @@
       "use": "@vercel/python"
     },
     {
-      "src": "index.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "knowledge.json",
-      "use": "@vercel/static"
-    },
-    {
       "src": "api/tts.py",
       "use": "@vercel/python"
     }
