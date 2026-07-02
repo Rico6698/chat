@@ -535,13 +535,15 @@ async function sendMessage(text) {
 }
 
 // TTS
+// TTS endpoint: Cloudflare Worker URL (deploy worker.js to get this)
+const TTS_URL = '/api/tts'; // change to your Worker URL, e.g. 'https://yizhi-tts.your-name.workers.dev'
 async function speakText(text) {
   const clean = text.replace(/<[^>]+>/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').slice(0, 500);
   if (!clean) return;
   setStatus('speaking', '\u6b63\u5728\u6717\u8bfb...');
   // Try Vercel edge-tts endpoint first
   try {
-    const resp = await fetch('/api/tts', {
+    const resp = await fetch(TTS_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({text: clean})
