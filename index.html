@@ -259,6 +259,7 @@ let currentConvId = null;
 let autoTTS = localStorage.getItem('medbot_tts') !== 'false';
 let recognition = null;
 let isRecording = false;
+let isSending = false;
 
 // Elements
 const sidebar = document.getElementById('sidebar');
@@ -333,6 +334,7 @@ function deleteConversation(id) {
 }
 
 function newConversation() {
+  isSending = false;
   const conv = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
     title: '新对话',
@@ -417,7 +419,7 @@ function scrollToBottom() {
 // Send message
 async function sendMessage(text) {
   text = text.trim();
-  if (!text) return;
+  if (!text || isSending) return;
 
   // Show messages container, hide welcome
   welcomeScreen.style.display = 'none';
@@ -455,7 +457,7 @@ async function sendMessage(text) {
 
   // Check if medical
   if (!isMedicalQuestion(text)) {
-    const rejectText = '抱歉，我是医疗健康助手，只能回答与医疗、健康相关的问题。请您提出健康相关的问题，我会尽力为您提供帮助。';
+    const rejectText = '抱歉，我是医学科普助手“医知”，可以回答医学健康问题和关于我的提问。';
     const rejectTs = Date.now();
     conv.messages.push({ role: 'ai', text: rejectText, reject: true, ts: rejectTs });
     conv.updatedAt = rejectTs;
@@ -467,6 +469,7 @@ async function sendMessage(text) {
   }
 
   // Show typing
+  isSending = true;
   appendTypingIndicator();
   scrollToBottom();
   setStatus('thinking', '正在思考...');
@@ -514,6 +517,7 @@ async function sendMessage(text) {
 
     // TTS
     if (autoTTS) speakText(aiText);
+    isSending = false;
 
   } catch (err) {
     removeTypingIndicator();
@@ -524,6 +528,7 @@ async function sendMessage(text) {
     renderSidebar();
     appendMessage('ai', errText, null, false, errTs);
     scrollToBottom();
+    isSending = false;
   }
 
   setStatus('ready', '就绪');
