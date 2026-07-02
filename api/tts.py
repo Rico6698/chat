@@ -1,65 +1,66 @@
 """
-Vercel Serverless Function: TTS (Text-to-Speech)
-Uses edge-tts with zh-CN-XiaoxiaoNeural voice
+Vercel Serverless Function: /api/tts
+Edge TTS with zh-CN-XiaoxiaoNeural voice
 """
 import asyncio
 import re
 import json
-from http.server import BaseHTTPRequestHandler
+
 
 VOICE = "zh-CN-XiaoxiaoNeural"
 
-async def generate_tts(text: str) -> bytes:
-    """Generate TTS audio using edge-tts"""
+
+async def _generate(text: str) -> bytes:
     import edge_tts
-    communicate = edge_tts.Communicate(text, VOICE)
-    audio_data = b""
-    async for chunk in communicate.stream():
+    comm = edge_tts.Communicate(text, VOICE)
+    data = b""
+    async for chunk in comm.stream():
         if chunk["type"] == "audio":
-            audio_data += chunk["data"]
-    return audio_data
+            data += chunk["data"]
+    return data
 
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            data = json.loads(body)
-            text = data.get("text", "").strip()
+def handler(request):
+    if request.method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            },
+        }
 
-            if not text:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "text is required"}).encode())
-                return
+    if request.method != "POST":
+        return {"statusCode": 405, "body": json.dumps({"error": "POST only"})}
 
-            # Clean text
-            clean = re.sub(r'[#*_`~\[\](){}]', '', text)
-            clean = re.sub(r'[\U0001F300-\U0001FAFF\u2600-\u27BF]', '', clean)
-            clean = clean.strip()
-            if len(clean) > 500:
-                clean = clean[:500]
+    try:
+        body = json.loads(request.body)
+    except Exception:
+        return {"statusCode": 400, "body": json.dumps({"error": "Invalid JSON"})}
 
-            # Generate audio
-            audio = asyncio.run(generate_tts(clean))
+    text = body.get("text", "").strip()
+    if not text:
+        return {"statusCode": 400, "body": json.dumps({"error": "text required"})}
 
-            self.send_response(200)
-            self.send_header("Content-Type", "audio/mpeg")
-            self.send_header("Cache-Control", "public, max-age=3600")
-            self.end_headers()
-            self.wfile.write(audio)
+    clean = re.sub(r"[#*_`~\[\](){}]", "", text)
+    clean = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", clean).strip()
+    if len(clean) > 500:
+        clean = clean[:500]
 
-        except Exception as e:
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+    try:
+        audio = asyncio.run(_generate(clean))
+    except Exception as e:
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+    import base64
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "audio/mpeg",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+        },
+        "body": base64.b64encode(audio).decode(),
+        "isBase64Encoded": True,
+    }
